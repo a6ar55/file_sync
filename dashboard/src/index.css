@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50;
+  }
+}
+
+@layer components {
+  .node-card {
+    @apply bg-white rounded-lg shadow-md p-6 border-2 transition-all duration-300;
+  }
+  
+  .node-card.online {
+    @apply border-green-400;
+  }
+  
+  .node-card.offline {
+    @apply border-gray-300;
+  }
+  
+  .node-card.syncing {
+    @apply border-blue-400 animate-pulse;
+  }
+  
+  .file-item {
+    @apply bg-white rounded-md p-4 border border-gray-200 transition-all duration-300;
+  }
+  
+  .file-item.syncing {
+    @apply border-blue-400 bg-blue-50 animate-pulse-slow;
+  }
+  
+  .sync-arrow {
+    @apply text-gray-400 transition-all duration-500;
+  }
+  
+  .sync-arrow.active {
+    @apply text-blue-500 animate-bounce-gentle;
+  }
+} 
