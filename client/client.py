@@ -365,6 +365,43 @@ class DistributedFileClient:
         except KeyboardInterrupt:
             await self.stop()
 
+    async def download_file(self, file_id: str, target_path: str) -> bool:
+        """Download a file from the coordinator."""
+        try:
+            print(f"Downloading file {file_id} to {target_path}")
+            
+            # Get file metadata from coordinator
+            response = await self.http_client.get(f"{self.coordinator_url}/api/files/{file_id}")
+            if response.status_code != 200:
+                print(f"Failed to get file metadata: {response.text}")
+                return False
+                
+            metadata = response.json()
+            
+            # Download file content
+            download_response = await self.http_client.get(
+                f"{self.coordinator_url}/api/files/{file_id}/download",
+                params={"node_id": self.node_id}
+            )
+            
+            if download_response.status_code != 200:
+                print(f"Failed to download file: {download_response.text}")
+                return False
+            
+            # Ensure target directory exists
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            
+            # Write file content
+            with open(target_path, 'wb') as f:
+                f.write(download_response.content)
+            
+            print(f"✅ File downloaded successfully: {os.path.basename(target_path)}")
+            return True
+            
+        except Exception as e:
+            print(f"Error downloading file: {e}")
+            return False
+
 
 async def create_and_run_client(node_id: str, 
                                node_name: str,

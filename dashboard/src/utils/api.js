@@ -136,7 +136,22 @@ export const fileApi = {
   getByNode: async (nodeId) => {
     const response = await api.get(`/api/nodes/${nodeId}/files`);
     return response.data;
-  }
+  },
+
+  download: async (fileId) => {
+    const response = await fetch(`${API_BASE_URL}/api/files/${fileId}/download`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download file: ${response.statusText}`);
+    }
+    
+    return response;
+  },
 };
 
 // System metrics

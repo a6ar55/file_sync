@@ -12,7 +12,8 @@ import random
 from shared.models import (
     RegisterNodeRequest, FileUploadRequest, DeltaSyncRequest, RestoreVersionRequest,
     NodeInfo, FileMetadata, SyncEvent, ConflictInfo, NetworkMetrics, NodeStatus,
-    SyncEventType, VectorClockModel, ChunkSignature, FileDelta, DeltaSyncMetrics
+    SyncEventType, VectorClockModel, ChunkSignature, FileDelta, DeltaSyncMetrics,
+    FileChunk
 )
 from coordinator.database import DatabaseManager
 from shared.utils import generate_file_id, calculate_file_hash, calculate_file_hash_from_data
@@ -161,7 +162,8 @@ class AdvancedDeltaSync:
     CHUNK_SIZE = 4096  # 4KB chunks
     
     def __init__(self):
-        self.chunk_cache = {}  # Cache of chunk signatures
+        self.chunk_cache = {}  # Cache of chunk signatures by file_id
+        self.global_chunk_store = {}  # Global store: chunk_hash -> (file_id, chunk_data)
     
     def calculate_rolling_hash(self, data: bytes, start: int = 0, length: int = None) -> int:
         """Calculate rolling hash (simplified Adler-32 style)."""
@@ -207,15 +209,41 @@ class AdvancedDeltaSync:
     
     def create_content_delta(self, old_content: bytes, new_content: bytes, 
                            file_id: str = None) -> FileDelta:
-        """Create delta between two content versions."""
+        """Create delta between two content versions with proper chunk tracking."""
         import time
         start_time = time.time()
         
-        # Create signatures for old content
-        old_signatures = self.create_signature(old_content, f"{file_id}_old") if old_content else []
-        old_sig_map = {sig.strong_hash: sig for sig in old_signatures}
+        # Create signatures for old content and store them
+        old_signatures = []
+        old_sig_map = {}
         
-        # Create chunks for new content and determine which are unchanged
+        if old_content:
+            old_signatures = self.create_signature(old_content, f"{file_id}_old")
+            old_sig_map = {sig.strong_hash: sig for sig in old_signatures}
+            
+            # Store old chunks in global cache
+            for i, sig in enumerate(old_signatures):
+                chunk_start = sig.offset
+                chunk_end = min(chunk_start + self.CHUNK_SIZE, len(old_content))
+                chunk_data = old_content[chunk_start:chunk_end]
+                self.global_chunk_store[sig.strong_hash] = (file_id, chunk_data)
+        
+        # Also check cache for this specific file
+        file_cache_key = f"{file_id}_chunks"
+        if file_cache_key in self.chunk_cache:
+            for cached_hash in self.chunk_cache[file_cache_key]:
+                if cached_hash not in old_sig_map and cached_hash in self.global_chunk_store:
+                    # Add cached chunks to old signatures
+                    cached_data = self.global_chunk_store[cached_hash][1]
+                    old_sig_map[cached_hash] = ChunkSignature(
+                        index=len(old_signatures),
+                        offset=0,  # Offset not relevant for cached chunks
+                        size=len(cached_data),
+                        weak_hash=self.calculate_rolling_hash(cached_data),
+                        strong_hash=cached_hash
+                    )
+        
+        # Analyze new content chunks
         new_chunks = []
         unchanged_chunks = []
         chunks_to_add = []
@@ -230,13 +258,17 @@ class AdvancedDeltaSync:
             weak_hash = self.calculate_rolling_hash(chunk_data)
             strong_hash = self.calculate_strong_hash(chunk_data)
             
-            # Check if this chunk exists in old content
+            # Check if this chunk exists in old content or global cache
             if strong_hash in old_sig_map:
-                # Chunk unchanged
+                # Chunk unchanged - can reuse
+                unchanged_chunks.append(chunk_index)
+                bandwidth_saved += len(chunk_data)
+            elif strong_hash in self.global_chunk_store:
+                # Chunk exists in global cache from other files/versions
                 unchanged_chunks.append(chunk_index)
                 bandwidth_saved += len(chunk_data)
             else:
-                # New or modified chunk
+                # New or modified chunk - must transmit
                 chunk = FileChunk(
                     index=chunk_index,
                     offset=i,
@@ -247,8 +279,16 @@ class AdvancedDeltaSync:
                     is_new=True
                 )
                 chunks_to_add.append(chunk)
+                
+                # Store new chunk in global cache
+                self.global_chunk_store[strong_hash] = (file_id, chunk_data)
             
             new_chunks.append(chunk_index)
+        
+        # Update file-specific chunk cache
+        new_chunk_hashes = [self.calculate_strong_hash(new_content[i:i+self.CHUNK_SIZE]) 
+                           for i in range(0, len(new_content), self.CHUNK_SIZE)]
+        self.chunk_cache[file_cache_key] = new_chunk_hashes
         
         sync_time = time.time() - start_time
         compression_ratio = (bandwidth_saved / len(new_content) * 100) if new_content else 0
@@ -260,7 +300,7 @@ class AdvancedDeltaSync:
             old_size=len(old_content) if old_content else 0,
             new_size=len(new_content),
             chunks_to_add=chunks_to_add,
-            chunks_to_remove=[],  # Not used in this simple implementation
+            chunks_to_remove=[],  # Not used in this implementation
             chunks_unchanged=unchanged_chunks,
             total_chunks=len(new_chunks),
             bandwidth_saved=bandwidth_saved,
@@ -578,6 +618,62 @@ class CoordinatorServer:
                 
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Error getting file content: {str(e)}")
+        
+        @self.app.get("/api/files/{file_id}/download")
+        async def download_file(file_id: str, node_id: str = None):
+            """Download a file from the coordinator."""
+            try:
+                # Get current version
+                current_version = self.file_manager.get_current_version(file_id)
+                if not current_version:
+                    raise HTTPException(status_code=404, detail="File not found")
+                
+                # Get content
+                content = self.file_manager.get_version_content(current_version['version_id'])
+                if content is None:
+                    raise HTTPException(status_code=404, detail="File content not found")
+                
+                # Get file metadata for name and type
+                file_metadata = await self.db.get_file(file_id)
+                if not file_metadata:
+                    raise HTTPException(status_code=404, detail="File metadata not found")
+                
+                # Log download event
+                if node_id:
+                    download_event = SyncEvent(
+                        event_id=str(uuid.uuid4()),
+                        event_type=SyncEventType.FILE_ACCESSED,
+                        node_id=node_id,
+                        file_id=file_id,
+                        timestamp=datetime.now(),
+                        data={
+                            'file_id': file_id,
+                            'file_name': file_metadata.name,
+                            'action': 'downloaded',
+                            'downloaded_by': node_id,
+                            'file_size': len(content)
+                        },
+                        vector_clock=VectorClockModel(clocks={node_id: 1})
+                    )
+                    await self.broadcast_event(download_event)
+                
+                # Return file content as binary response
+                content_type = getattr(file_metadata, 'content_type', 'application/octet-stream')
+                
+                from fastapi.responses import Response
+                return Response(
+                    content=content,
+                    media_type=content_type,
+                    headers={
+                        "Content-Disposition": f"attachment; filename=\"{file_metadata.name}\"",
+                        "Content-Length": str(len(content)),
+                        "X-File-ID": file_id,
+                        "X-File-Hash": file_metadata.hash
+                    }
+                )
+                
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
         
         @self.app.delete("/api/files/{file_id}")
         async def delete_file(file_id: str, request: Request):

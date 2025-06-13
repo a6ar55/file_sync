@@ -9,13 +9,15 @@ import {
   AlertCircle,
   Server,
   Calendar,
-  HardDrive
+  HardDrive,
+  Edit3,
+  Eye
 } from 'lucide-react';
 import { fileApi } from '../utils/api';
 import { formatFileSize, formatDate } from '../utils/api';
 import { toast } from 'react-toastify';
 
-const FileManager = ({ files, nodes, syncingFiles, onFileDeleted }) => {
+const FileManager = ({ files, nodes, syncingFiles, onFileDeleted, onFileEdit }) => {
   const [selectedFiles, setSelectedFiles] = useState(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [sortBy, setSortBy] = useState('name');
@@ -135,6 +137,31 @@ const FileManager = ({ files, nodes, syncingFiles, onFileDeleted }) => {
     return node?.name || nodeId;
   };
 
+  const handleDownload = async (file) => {
+    try {
+      const response = await fileApi.download(file.file_id);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success(`Downloaded ${file.name}`);
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error(`Failed to download ${file.name}`);
+    }
+  };
+
+  const handleEdit = (file) => {
+    if (onFileEdit) {
+      onFileEdit(file);
+    }
+  };
+
   const SortButton = ({ field, children }) => (
     <button
       onClick={() => handleSort(field)}
@@ -209,7 +236,7 @@ const FileManager = ({ files, nodes, syncingFiles, onFileDeleted }) => {
       <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
         <div className="grid grid-cols-12 gap-4 items-center text-sm font-medium text-gray-700">
           <div className="col-span-1"></div>
-          <div className="col-span-4">
+          <div className="col-span-3">
             <SortButton field="name">Name</SortButton>
           </div>
           <div className="col-span-2">
@@ -222,6 +249,7 @@ const FileManager = ({ files, nodes, syncingFiles, onFileDeleted }) => {
             <SortButton field="modified">Modified</SortButton>
           </div>
           <div className="col-span-1">Status</div>
+          <div className="col-span-1">Actions</div>
         </div>
       </div>
 
@@ -254,7 +282,7 @@ const FileManager = ({ files, nodes, syncingFiles, onFileDeleted }) => {
                 </div>
 
                 {/* File Info */}
-                <div className="col-span-4">
+                <div className="col-span-3">
                   <div className="flex items-center space-x-3">
                     <FileText className={`w-5 h-5 flex-shrink-0 ${
                       syncingFiles.includes(file.file_id) ? 'text-blue-500' : 'text-gray-500'
@@ -309,6 +337,30 @@ const FileManager = ({ files, nodes, syncingFiles, onFileDeleted }) => {
                     </motion.div>
                   ) : (
                     <CheckCircle className="w-4 h-4 text-green-500" />
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="col-span-1 flex items-center justify-end space-x-1">
+                  {syncingFiles.includes(file.file_id) ? (
+                    <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleEdit(file)}
+                        className="p-1 text-gray-500 hover:text-green-600 transition-colors"
+                        title="Edit File"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDownload(file)}
+                        className="p-1 text-gray-500 hover:text-blue-600 transition-colors"
+                        title="Download"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>

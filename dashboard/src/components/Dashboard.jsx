@@ -6,6 +6,9 @@ import SyncVisualization from './SyncVisualization';
 import NetworkTopology from './NetworkTopology';
 import VectorClockVisualization from './VectorClockVisualization';
 import DeltaSyncDashboard from './DeltaSyncDashboard';
+import DeltaSyncVisualization from './DeltaSyncVisualization';
+import FileEditor from './FileEditor';
+import MultiNodeEditor from './MultiNodeEditor';
 import { 
   Network, 
   Clock, 
@@ -13,7 +16,8 @@ import {
   Activity, 
   BarChart3,
   Layers,
-  RefreshCw
+  RefreshCw,
+  Edit
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -23,6 +27,7 @@ const Dashboard = () => {
   const [metrics, setMetrics] = useState({});
   const [activeTab, setActiveTab] = useState('overview');
   const [isConnected, setIsConnected] = useState(false);
+  const [editingFile, setEditingFile] = useState(null);
 
   useEffect(() => {
     // Fetch initial data
@@ -132,6 +137,7 @@ const Dashboard = () => {
     { id: 'overview', name: 'Overview', icon: Activity },
     { id: 'topology', name: 'Network Topology', icon: Network },
     { id: 'vector-clocks', name: 'Vector Clocks', icon: Clock },
+    { id: 'editor', name: 'File Editor', icon: Edit },
     { id: 'delta-sync', name: 'Delta Sync', icon: Layers },
     { id: 'sync-monitor', name: 'Sync Monitor', icon: Database },
     { id: 'performance', name: 'Performance', icon: BarChart3 }
@@ -151,7 +157,8 @@ const Dashboard = () => {
               <FileManager 
                 files={files} 
                 nodes={nodes}
-                onFilesChange={fetchFiles} 
+                onFilesChange={fetchFiles}
+                onFileEdit={setEditingFile}
               />
             </div>
             <SyncVisualization 
@@ -177,9 +184,14 @@ const Dashboard = () => {
           />
         );
       
+      case 'editor':
+        return (
+          <FileEditor />
+        );
+      
       case 'delta-sync':
         return (
-          <DeltaSyncDashboard />
+          <DeltaSyncVisualization />
         );
       
       case 'sync-monitor':
@@ -324,6 +336,18 @@ const Dashboard = () => {
           </div>
         </div>
       </footer>
+
+      {/* Multi-Node Editor Modal */}
+      <MultiNodeEditor
+        file={editingFile}
+        nodes={nodes}
+        isOpen={!!editingFile}
+        onClose={() => setEditingFile(null)}
+        onFileSaved={() => {
+          fetchFiles();
+          fetchEvents();
+        }}
+      />
     </div>
   );
 };

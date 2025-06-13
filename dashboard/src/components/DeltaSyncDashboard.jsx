@@ -22,7 +22,8 @@ import {
   Save,
   Clock,
   Layers,
-  Package
+  Package,
+  FileText
 } from 'lucide-react';
 
 const DeltaSyncDashboard = () => {
@@ -100,6 +101,25 @@ const DeltaSyncDashboard = () => {
 
   const efficiency = deltaMetrics.average_compression_ratio || 0;
   const bandwidthSaved = deltaMetrics.total_bandwidth_saved || 0;
+
+  const renderDeltaSyncIndicator = (file) => {
+    if (!file.delta_sync_info) return null;
+    
+    const { bytes_saved, total_bytes } = file.delta_sync_info;
+    const savings_percentage = ((bytes_saved / total_bytes) * 100).toFixed(1);
+    
+    return (
+      <div className="flex items-center space-x-2 text-sm">
+        <div className="flex items-center space-x-1 text-green-600">
+          <HardDrive className="w-4 h-4" />
+          <span>{savings_percentage}% saved</span>
+        </div>
+        <div className="text-gray-500">
+          ({formatBytes(bytes_saved)} of {formatBytes(total_bytes)})
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">

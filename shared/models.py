@@ -24,6 +24,7 @@ class SyncEventType(str, Enum):
     FILE_MODIFIED = "file_modified"
     FILE_DELETED = "file_deleted"
     FILE_MOVED = "file_moved"
+    FILE_ACCESSED = "file_accessed"
     CONFLICT_DETECTED = "conflict_detected"
     CONFLICT_RESOLVED = "conflict_resolved"
     NODE_JOINED = "node_joined"
